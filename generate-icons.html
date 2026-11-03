@@ -1,0 +1,10 @@
+<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Icônes Fuel me</title><body style="font:18px system-ui;padding:40px;background:#f8f6ef;color:#173e35"><h1>Les icônes de Fuel me</h1><p>Clique chaque bouton, puis déplace les trois PNG téléchargés dans le dossier du projet.</p><div id="buttons"></div><script>
+for(const size of [180,192,512]){
+ const canvas=document.createElement('canvas');canvas.width=canvas.height=size;
+ const x=canvas.getContext('2d');x.fillStyle='#173e35';x.fillRect(0,0,size,size);
+ x.fillStyle='#f8f6ef';x.font=`800 ${size*.45}px system-ui`;x.textAlign='center';x.textBaseline='middle';x.fillText('F',size*.43,size*.51);
+ x.fillStyle='#e76e3c';x.beginPath();x.moveTo(size*.68,size*.23);x.lineTo(size*.55,size*.52);x.lineTo(size*.69,size*.52);x.lineTo(size*.59,size*.78);x.lineTo(size*.83,size*.43);x.lineTo(size*.69,size*.43);x.closePath();x.fill();
+ const b=document.createElement('button');b.textContent=`Télécharger icon-${size}.png`;b.style='padding:15px;margin:10px';
+ b.onclick=()=>{const a=document.createElement('a');a.download=`icon-${size}.png`;a.href=canvas.toDataURL('image/png');a.click();};document.getElementById('buttons').append(b);
+}
+</script></body></html>
