@@ -45,59 +45,32 @@ export function mealTarget(daily,slot){
  return Object.fromEntries(['kcal','p','c','f'].map(k=>[k,round(daily[k]*share,1)]));
 }
 export function feasible(recipe,stock){return recipe.lines.every(l=>stock.has(l.id));}
-export function portionStep(food,scale){return scale?(food.unit==='pièce'?food.grams:food.id==='oil'?1:5):food.grams*food.step;}
+export function portionStep(food,scale){return scale?(food.scaleStep||(food.unit==='pièce'?food.grams:food.grams<=5?1:5)):food.grams*food.step;}
+// Le mode de mesure est un affichage. Le changer ne modifie jamais les grammes stockés.
+export function formatQuantity(g,food,scale){
+ if(scale)return {value:round(g,1),unit:'g',amount:`${round(g,1)} g`,step:portionStep(food,true)};
+ const plurals={'cuillère à soupe':'cuillères à soupe','cuillère à café':'cuillères à café','demi-cuillère à café':'demi-cuillères à café','verre 200 ml':'verres de 200 ml','boîte égouttée':'boîtes égouttées','petite pièce':'petites pièces','petite poignée':'petites poignées','petite pomme':'petites pommes','petite poire':'petites poires','banane moyenne':'bananes moyennes','demi-mangue':'demi-mangues','demi-bloc':'demi-blocs','blanc d’œuf':'blancs d’œufs','bol en cubes':'bols en cubes','dose de référence':'doses de référence','cuillère à soupe émiettée':'cuillères à soupe émiettées'};
+ const value=round(g/food.grams,2),unit=value>1?(food.unitPlural||plurals[food.unit]||(food.unit.endsWith('s')?food.unit:food.unit+'s')):food.unit;
+ const display=value.toLocaleString('fr-FR',{maximumFractionDigits:2});
+ return {value,unit,amount:`≈ ${display} ${unit}`,step:food.step};
+}
 export function quantize(lines,foods,scale){
- return lines.map(line=>{
-  const food=foods.find(f=>f.id===line.id),step=portionStep(food,scale);
-  const g=round(Math.max(step,Math.round(line.g/step)*step),2);
-  const piece=food.unit==='pièce';
-  const amount=scale&&!piece?`${round(g,1)} g`:`≈ ${round(g/food.grams,2)} ${food.unit}${g/food.grams>1?'s':''} (${round(g,1)} g estimés)`;
-  return {...line,g,amount};
- });
+ return lines.map(l=>{const food=foods.find(f=>f.id===l.id);return {...l,...formatQuantity(l.g,food,scale)};});
 }
-export function evaluatePortion(lines,foods,target,scale=true){
- const actualLines=quantize(lines,foods,scale),n=nutrition(actualLines,foods);
- const delta=Object.fromEntries(['p','c','f'].map(k=>[k,n[k]-target[k]]));
- const ok=Math.abs(delta.p)<=Math.max(3,target.p*.1)&&Math.abs(delta.c)<=Math.max(3,target.c*.1)&&Math.abs(delta.f)<=Math.max(2,target.f*.1);
- return {lines:actualLines,n,delta,ok};
+export function portion(lines,foods){
+ return {lines:lines.map(l=>({id:l.id,g:Number(l.g)})),n:nutrition(lines,foods)};
 }
-export function adapt(recipe,foods,target,scale=true){
- if(!recipe.lines.length)throw Error('Ajoute au moins un ingrédient au plat.');
- if(['p','c','f'].some(k=>!Number.isFinite(target[k])||target[k]<0)||target.p+target.c+target.f<=0)
-  throw Error('Renseigne au moins une cible de macro positive.');
- const base=recipe.lines.map(l=>({...l})),baseN=nutrition(base,foods);
- const ratios=['p','c','f'].filter(k=>baseN[k]>0&&target[k]>0).map(k=>target[k]/baseN[k]).sort((a,b)=>a-b);
- const factor=Math.max(.35,Math.min(2.5,ratios[Math.floor(ratios.length/2)]||1));
- const bounds=base.map(l=>[Math.max(.1,l.g*.35),l.g*2.5]);
- let best=base.map(l=>({...l,g:l.g*factor}));
- const score=ls=>{
-  const n=nutrition(ls,foods);
-  return ((n.p-target.p)/Math.max(8,target.p))**2+((n.c-target.c)/Math.max(12,target.c))**2+((n.f-target.f)/Math.max(6,target.f))**2+
-   .001*ls.reduce((s,l,i)=>s+(l.g/(base[i].g*factor)-1)**2,0);
- };
- // Aucun terme calorique : changer une cible kcal historique n’influence pas le résultat.
- let value=score(best);
- for(const step of [.3,.12,.05,.02,.008])for(let pass=0;pass<24;pass++){
-  let changed=false;
-  for(let i=0;i<best.length;i++)for(const sign of [-1,1]){
-   const trial=best.map(l=>({...l}));trial[i].g=Math.max(bounds[i][0],Math.min(bounds[i][1],trial[i].g+sign*base[i].g*step));
-   const s=score(trial);if(s<value){best=trial;value=s;changed=true;}
-  }
-  if(!changed)break;
- }
- best=quantize(best,foods,scale);value=score(best);
- // Raffinement sur les quantités réalisables : les macros affichées suivent les arrondis.
- for(let pass=0;pass<12;pass++){
-  let changed=false;
-  for(let i=0;i<best.length;i++)for(const sign of [-1,1]){
-   const step=portionStep(foods.find(f=>f.id===best[i].id),scale),g=round(best[i].g+sign*step,2);
-   if(g<Math.max(step,bounds[i][0]-step/2)||g>bounds[i][1]+step/2)continue;
-   const trial=best.map(l=>({...l}));trial[i].g=g;const s=score(trial);
-   if(s<value-1e-9){best=trial;value=s;changed=true;}
-  }
-  if(!changed)break;
- }
- return evaluatePortion(best,foods,target,scale);
+export const stockKey=(profileId,foodId)=>`${profileId}:${foodId}`;
+export function profileStock(foods,items,profileId){
+ const initialized=items.some(x=>x.kind==='stock'&&x.key===stockKey(profileId,'__initialized'));
+ const basics=['water','salt','pepperblack','oil'];
+ return new Set(foods.filter(f=>{
+  const own=items.find(x=>x.kind==='stock'&&x.key===stockKey(profileId,f.id));
+  if(own)return own.payload.selected===true;
+  if(initialized)return false;
+  const legacy=items.find(x=>x.kind==='stock'&&x.key===f.id);
+  return legacy?legacy.payload.selected===true:basics.includes(f.id);
+ }).map(f=>f.id));
 }
 export function isoDate(date=new Date()){return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;}
 export function weekDates(date){
